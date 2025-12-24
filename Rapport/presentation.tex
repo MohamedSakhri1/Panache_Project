@@ -1,0 +1,245 @@
+\documentclass{beamer}
+
+% ================= THEME & COULEURS =================
+\usetheme{Madrid}
+\usecolortheme{dolphin}
+\usefonttheme{professionalfonts}
+
+% ================= PACKAGES =================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+
+% Configuration des codes sources
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstset{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\scriptsize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+
+% ================= INFOS PRÉSENTATION =================
+\title[Détection de Fraudes Temps Réel]{Pipeline de Détection de Fraudes Bancaires}
+\subtitle{Architecture Lambda : Kafka, Spark, HDFS, Impala}
+\author{Mohamed SAKHRI}
+\institute[Univ]{Module Big Data / Data Engineering}
+\date{\today}
+
+\begin{document}
+
+% --- Slide de titre ---
+\frame{\titlepage}
+
+% --- Sommaire ---
+\begin{frame}{Sommaire}
+    \tableofcontents
+\end{frame}
+
+% ================= SECTION 1 : INTRODUCTION =================
+\section{Introduction}
+
+\begin{frame}{Contexte et Problématique}
+    \textbf{Le Contexte Bancaire :}
+    \begin{itemize}
+        \item Flux continu ("Stream") de millions de transactions.
+        \item Nécessité de sécuriser les paiements instantanément.
+    \end{itemize}
+
+    \vspace{0.5cm}
+
+    \textbf{La Problématique :}
+    \begin{alertblock}{Le défi du Temps Réel}
+        Les traitements par lots (Batch) nocturnes sont inefficaces contre la fraude active. Il faut détecter une anomalie en \textbf{moins d'une seconde}.
+    \end{alertblock}
+\end{frame}
+
+\begin{frame}{La Solution : Architecture Lambda}
+    Nous avons mis en place une architecture distribuée Dockerisée :
+    \begin{enumerate}
+        \item \textbf{Ingestion} : Apache Kafka (Tampon haute performance).
+        \item \textbf{Processing} : Spark Structured Streaming (Moteur in-memory).
+        \item \textbf{Serving} : Impala (SQL interactif sur HDFS).
+    \end{enumerate}
+\end{frame}
+
+% ================= SECTION 2 : ARCHITECTURE =================
+\section{Architecture Technique}
+
+\begin{frame}{Schéma Global du Pipeline}
+    \begin{figure}
+        \centering
+        \includegraphics[width=0.9\textwidth]{example-image}
+        \caption{Flux : Producer $\to$ Kafka $\to$ Spark $\to$ HDFS $\to$ Impala}
+    \end{figure}
+\end{frame}
+
+\begin{frame}{Technologies Clés}
+    \begin{columns}
+        \column{0.5\textwidth}
+        \textbf{Apache Kafka}
+        \begin{itemize}
+            \item Découplage Producteur/Consommateur.
+            \item Résistance aux pannes (Replay).
+        \end{itemize}
+
+        \vspace{0.5cm}
+        \textbf{Spark Structured Streaming}
+        \begin{itemize}
+            \item API Dataframe unifiée.
+            \item Gestion des états et Checkpoints.
+        \end{itemize}
+
+        \column{0.5\textwidth}
+        \textbf{HDFS \& Parquet}
+        \begin{itemize}
+            \item Stockage distribué.
+            \item Format colonnaire (Projection Pushdown).
+        \end{itemize}
+
+        \vspace{0.5cm}
+        \textbf{Apache Impala}
+        \begin{itemize}
+            \item Moteur SQL MPP (Massively Parallel Processing).
+            \item Latence très faible comparée à Hive.
+        \end{itemize}
+    \end{columns}
+\end{frame}
+
+% ================= SECTION 3 : IMPLÉMENTATION =================
+\section{Implémentation}
+
+\begin{frame}[fragile]{Ingestion (Python)}
+    Simulation de transactions JSON envoyées vers le topic \texttt{transactions}.
+
+    \begin{lstlisting}[language=Python, caption=Producer Script]
+transaction = {
+    "id": random.randint(1000, 9999),
+    "montant": random.uniform(10.0, 15000.0), 
+    "ville": "Paris",
+    "type": "CB"
+}
+# Envoi asynchrone vers Kafka
+producer.send('transactions', value=transaction)
+    \end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{Traitement (Scala Spark)}
+    Transformation et enrichissement du flux en temps réel.
+
+    \begin{lstlisting}[language=Scala, caption=Logique de Détection]
+// Détection simple : Montant > 10 000
+val processedDF = transactionDF.withColumn("is_fraud", 
+  when($"montant" > 10000, true).otherwise(false)
+)
+    \end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{Le Challenge du Stockage}
+    \textbf{Problème :} Spark génère des métadonnées (\texttt{\_spark\_metadata}) qui polluent la lecture SQL dans Impala.
+
+    \vspace{0.3cm}
+    \textbf{Solution :} Le Partitionnement par Ville.
+
+    \begin{lstlisting}[language=Scala]
+val query = processedDF.writeStream
+  .format("parquet")
+  .option("path", "hdfs://namenode:8020/user/hive/warehouse/transactions")
+  .partitionBy("ville") // Création de sous-dossiers
+  .start()
+    \end{lstlisting}
+\end{frame}
+
+% ================= SECTION 4 : ANALYSE =================
+\section{Analyse des Résultats}
+
+\begin{frame}[fragile]{Impala : Création de la Table}
+    Déclaration de la table externe partitionnée.
+
+    \begin{lstlisting}[language=SQL]
+CREATE EXTERNAL TABLE transactions_fraude (...)
+PARTITIONED BY (ville STRING)
+STORED AS PARQUET
+LOCATION 'hdfs://namenode:8020/user/hive/warehouse/transactions';
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Commande Critique :}
+    \begin{lstlisting}[language=SQL]
+ALTER TABLE transactions_fraude RECOVER PARTITIONS;
+    \end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{KPIs : Villes à Risque}
+    Exemple de requête analytique :
+    \begin{lstlisting}[language=SQL]
+SELECT ville, count(*) as nb_fraudes, avg(montant)
+FROM transactions_fraude
+WHERE is_fraud = true
+GROUP BY ville
+ORDER BY nb_fraudes DESC;
+    \end{lstlisting}
+
+    \begin{table}
+    \centering
+    \begin{tabular}{lrr}
+        \toprule
+        \textbf{Ville} & \textbf{Nb Fraudes} & \textbf{Moyenne (€)} \\
+        \midrule
+        Paris & 45 & 12 500 \\
+        Lyon & 12 & 10 200 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Exemple de Résultats}
+    \end{table}
+\end{frame}
+
+% ================= SECTION 5 : CONCLUSION =================
+\section{Conclusion}
+
+\begin{frame}{Bilan du Projet}
+    \begin{block}{Accomplissements}
+    \begin{itemize}
+        \item Pipeline End-to-End opérationnel (Ingestion $\to$ Viz).
+        \item Stack technique moderne (Docker, Spark 3.5, Impala).
+        \item Résolution de problèmes complexes (Réseau Docker, Compatibilité OS).
+    \end{itemize}
+    \end{block}
+
+    \vspace{0.5cm}
+    \textbf{Perspectives :}
+    \begin{itemize}
+        \item Intégration d'un dashboarding temps réel (Grafana).
+        \item Machine Learning avancé (Spark MLlib) au lieu d'une règle statique.
+    \end{itemize}
+\end{frame}
+
+\begin{frame}
+    \centering
+    \Huge \textbf{Merci de votre attention}
+    
+    \vspace{1.5cm}
+    \Large Avez-vous des questions ?
+\end{frame}
+
+\end{document}
