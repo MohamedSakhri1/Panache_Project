@@ -1,6 +1,6 @@
-./Rapport
-./.vscode
-./hdfs
-./.scala-build
-./metals
-./fraud_analysis.txt
+Rapport
+.vscode
+hdfs
+.scala-build
+metals
+project_info.txt
